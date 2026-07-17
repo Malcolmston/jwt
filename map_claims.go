@@ -81,6 +81,22 @@ func (m MapClaims) GetIssuer() string { return stringClaim(m["iss"]) }
 // GetSubject returns the sub claim as a string, or "" if absent or non-string.
 func (m MapClaims) GetSubject() string { return stringClaim(m["sub"]) }
 
+// GetID returns the jti (JWT ID) claim as a string, or "" if absent.
+func (m MapClaims) GetID() string { return stringClaim(m["jti"]) }
+
+// GetNonce returns the OpenID Connect "nonce" claim as a string, or "" if
+// absent. The nonce binds a token to a client session and must be compared by
+// the caller against the value it sent.
+func (m MapClaims) GetNonce() string { return stringClaim(m["nonce"]) }
+
+// GetAuthorizedParty returns the OpenID Connect "azp" (authorized party) claim
+// as a string, or "" if absent. When present it names the party the token was
+// issued to, and should equal the relying party's client ID.
+func (m MapClaims) GetAuthorizedParty() string { return stringClaim(m["azp"]) }
+
+// GetString returns claim key as a string, or "" if absent or not a string.
+func (m MapClaims) GetString(key string) string { return stringClaim(m[key]) }
+
 func stringClaim(v any) string {
 	if s, ok := v.(string); ok {
 		return s

@@ -65,4 +65,28 @@ var (
 	// ErrNoneAlgDisallowed indicates a token used the "none" algorithm but the
 	// parser was not configured to accept unsecured tokens.
 	ErrNoneAlgDisallowed = errors.New("jwt: 'none' signature type is not allowed")
+
+	// ErrInvalidKey indicates a JWK could not be decoded into a usable key, or
+	// held inconsistent parameters.
+	ErrInvalidKey = errors.New("jwt: key is invalid")
+
+	// ErrKeyNotFound indicates a JWKS did not contain a key matching the
+	// requested key ID.
+	ErrKeyNotFound = errors.New("jwt: no key found for kid")
+
+	// ErrTokenTooOld indicates the token's age (now minus iat) exceeds the
+	// maximum permitted by WithMaxTokenAge.
+	ErrTokenTooOld = errors.New("jwt: token is older than the maximum allowed age")
+
+	// ErrInvalidCrit indicates the JOSE "crit" header referenced an extension
+	// the parser does not understand, or was itself malformed.
+	ErrInvalidCrit = errors.New("jwt: unsupported or malformed 'crit' header")
+
+	// ErrInvalidTyp indicates the JOSE "typ" header did not match one of the
+	// types required by WithValidTypes.
+	ErrInvalidTyp = errors.New("jwt: token has invalid 'typ' header")
+
+	// ErrJWKSFetch indicates a JWKS could not be fetched or refreshed from its
+	// remote endpoint.
+	ErrJWKSFetch = errors.New("jwt: could not fetch JWKS")
 )

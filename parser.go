@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -16,10 +17,13 @@ type Keyfunc func(token *Token) (any, error)
 // Parser parses and validates tokens according to its configured options. The
 // zero value is usable but NewParser with options is the common path.
 type Parser struct {
-	validAlgs    []string
-	allowNone    bool
-	useJSONNumer bool
-	validator    *validator
+	validAlgs      []string
+	allowNone      bool
+	useJSONNumer   bool
+	validTypes     []string
+	requiredClaims []string
+	knownCrit      map[string]bool
+	validator      *validator
 }
 
 // ParserOption configures a Parser.
@@ -27,7 +31,9 @@ type ParserOption func(*Parser)
 
 // NewParser constructs a Parser with the given options.
 func NewParser(opts ...ParserOption) *Parser {
-	p := &Parser{validator: newValidator()}
+	// "b64" (RFC 7797 unencoded payload) is the only critical header this
+	// parser understands; any other value in "crit" is rejected.
+	p := &Parser{validator: newValidator(), knownCrit: map[string]bool{"b64": true}}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -95,6 +101,41 @@ func WithJSONNumber() ParserOption {
 	return func(p *Parser) { p.useJSONNumer = true }
 }
 
+// WithMaxTokenAge rejects a token whose age — the difference between the
+// verification time and its iat claim — exceeds d. The iat claim becomes
+// required; a token without it is rejected. This mirrors the "maxAge" option of
+// node's jsonwebtoken.
+func WithMaxTokenAge(d time.Duration) ParserOption {
+	return func(p *Parser) { p.validator.maxTokenAge = d }
+}
+
+// WithRequiredClaims rejects a token that does not carry every named claim (with
+// a non-null value). Use it to insist on, e.g., "jti" or a custom claim
+// regardless of the claims type in use.
+func WithRequiredClaims(names ...string) ParserOption {
+	return func(p *Parser) { p.requiredClaims = append(p.requiredClaims, names...) }
+}
+
+// WithValidTypes restricts the accepted JOSE "typ" header values to types. A
+// token whose typ header is present but not listed is rejected; a token with no
+// typ header is accepted (the header is optional per RFC 7519). Comparison is
+// case-insensitive, matching how "JWT" is conventionally written.
+func WithValidTypes(types ...string) ParserOption {
+	return func(p *Parser) { p.validTypes = append(p.validTypes, types...) }
+}
+
+// WithKnownCriticalHeaders registers additional JOSE "crit" header extension
+// names the caller understands and will process out of band. By default only
+// "b64" (RFC 7797) is recognized; any unrecognized critical header causes the
+// token to be rejected, as required by RFC 7515 §4.1.11.
+func WithKnownCriticalHeaders(names ...string) ParserOption {
+	return func(p *Parser) {
+		for _, n := range names {
+			p.knownCrit[n] = true
+		}
+	}
+}
+
 // Parse parses a compact JWT into a Token with MapClaims, using keyFunc to
 // resolve the verification key, then verifies the signature and validates the
 // claims. See ParseWithClaims to decode into a specific claims type.
@@ -120,6 +161,11 @@ func (p *Parser) Parse(tokenString string, keyFunc Keyfunc) (*Token, error) {
 func (p *Parser) ParseWithClaims(tokenString string, claims Claims, keyFunc Keyfunc) (*Token, error) {
 	token, parts, err := p.decode(tokenString, claims)
 	if err != nil {
+		return token, err
+	}
+
+	// Validate JOSE header constraints (typ and crit) before doing any crypto.
+	if err := p.checkHeader(token); err != nil {
 		return token, err
 	}
 
@@ -154,9 +200,89 @@ func (p *Parser) ParseWithClaims(tokenString string, claims Claims, keyFunc Keyf
 			return token, err
 		}
 	}
+	if err := p.checkRequiredClaims(token.Claims); err != nil {
+		return token, err
+	}
 
 	token.Valid = true
 	return token, nil
+}
+
+// checkHeader enforces the typ and crit JOSE header constraints.
+func (p *Parser) checkHeader(token *Token) error {
+	if len(p.validTypes) > 0 {
+		if typ, ok := token.Header["typ"].(string); ok && typ != "" {
+			if !containsFold(p.validTypes, typ) {
+				return fmt.Errorf("%w: %q", ErrInvalidTyp, typ)
+			}
+		}
+	}
+	crit, ok := token.Header["crit"]
+	if !ok {
+		return nil
+	}
+	list, ok := crit.([]any)
+	if !ok {
+		return fmt.Errorf("%w: crit must be an array of strings", ErrInvalidCrit)
+	}
+	for _, item := range list {
+		name, ok := item.(string)
+		if !ok {
+			return fmt.Errorf("%w: crit entries must be strings", ErrInvalidCrit)
+		}
+		// A critical header must also be present in the JOSE header (RFC 7515
+		// §4.1.11) and must be one the parser knows how to process.
+		if _, present := token.Header[name]; !present {
+			return fmt.Errorf("%w: critical header %q is absent", ErrInvalidCrit, name)
+		}
+		if !p.knownCrit[name] {
+			return fmt.Errorf("%w: unrecognized critical header %q", ErrInvalidCrit, name)
+		}
+	}
+	return nil
+}
+
+// checkRequiredClaims verifies that every claim named by WithRequiredClaims is
+// present and non-null. It works for any Claims type by round-tripping through
+// JSON.
+func (p *Parser) checkRequiredClaims(claims Claims) error {
+	if len(p.requiredClaims) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(claims)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("%w: claims are not a JSON object", ErrInvalidToken)
+	}
+	for _, name := range p.requiredClaims {
+		v, ok := raw[name]
+		if !ok || string(v) == "null" {
+			return fmt.Errorf("%w: %s", ErrTokenRequiredClaimMissing, name)
+		}
+	}
+	return nil
+}
+
+// ParseUnverified decodes a token's header and claims WITHOUT verifying the
+// signature or validating the claims. It is useful for inspecting a token
+// (e.g. reading the "kid" or "iss" to choose a key or key set) before
+// verification. The returned token has Valid == false and its Signature
+// decoded but unchecked.
+//
+// SECURITY: never trust the claims of a token returned by ParseUnverified. Use
+// Parse or ParseWithClaims for any token whose contents drive a decision.
+func (p *Parser) ParseUnverified(tokenString string, claims Claims) (*Token, []string, error) {
+	return p.decode(tokenString, claims)
+}
+
+// ParseUnverified is the package-level convenience form of
+// Parser.ParseUnverified, decoding into the supplied claims value without
+// verifying the signature. See the method for the security caveat.
+func ParseUnverified(tokenString string, claims Claims) (*Token, []string, error) {
+	return NewParser().ParseUnverified(tokenString, claims)
 }
 
 // decode splits the token, decodes the header and claims, and selects the
@@ -220,6 +346,17 @@ func (p *Parser) decode(tokenString string, claims Claims) (*Token, []string, er
 func contains(list []string, s string) bool {
 	for _, item := range list {
 		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// containsFold reports whether list contains s under ASCII case-insensitive
+// comparison.
+func containsFold(list []string, s string) bool {
+	for _, item := range list {
+		if strings.EqualFold(item, s) {
 			return true
 		}
 	}

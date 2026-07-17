@@ -69,7 +69,8 @@ func (t *Token) SignedString(key any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return signingString + "." + EncodeSegment(sig), nil
+	t.Raw = signingString + "." + EncodeSegment(sig)
+	return t.Raw, nil
 }
 
 // Sign is a convenience wrapper that builds a token from claims and method and
@@ -82,6 +83,14 @@ func Sign(claims Claims, method SigningMethod, key any) (string, error) {
 func (t *Token) SetKID(kid string) *Token {
 	t.Header["kid"] = kid
 	return t
+}
+
+// String returns the compact serialization of the token. For a token produced
+// by the parser it returns the original Raw string, giving a lossless
+// parse/serialize round-trip. For a token built with New/NewWithClaims that has
+// not yet been signed, Raw is empty and String returns "".
+func (t *Token) String() string {
+	return t.Raw
 }
 
 // splitToken splits a compact serialization into its three parts, returning an

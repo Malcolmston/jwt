@@ -33,6 +33,7 @@ type validator struct {
 	expectedIss        string
 	expectedSub        string
 	expirationRequired bool
+	maxTokenAge        time.Duration
 }
 
 func newValidator() *validator {
@@ -65,6 +66,18 @@ func (v *validator) Validate(c claimsGetter) error {
 			if now.Add(v.leeway).Before(iat.Time) {
 				errs = append(errs, fmt.Errorf("%w: issued at %v", ErrTokenUsedBeforeIssued, iat.Time))
 			}
+		}
+	}
+
+	// max-token-age: reject tokens whose age (now - iat) exceeds the bound.
+	// The iat claim is required for this check, mirroring node jsonwebtoken's
+	// maxAge behavior.
+	if v.maxTokenAge > 0 {
+		iat := c.GetIssuedAt()
+		if iat == nil {
+			errs = append(errs, fmt.Errorf("%w: iat (required by max-token-age)", ErrTokenRequiredClaimMissing))
+		} else if now.Sub(iat.Time) > v.maxTokenAge+v.leeway {
+			errs = append(errs, fmt.Errorf("%w: age %v exceeds %v", ErrTokenTooOld, now.Sub(iat.Time), v.maxTokenAge))
 		}
 	}
 

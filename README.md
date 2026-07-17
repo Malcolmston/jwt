@@ -11,16 +11,29 @@ no third-party modules, no cgo, no `require` directives.
   - RSA PKCS1v15: `RS256`, `RS384`, `RS512`
   - RSA-PSS: `PS256`, `PS384`, `PS512`
   - ECDSA (fixed-width `r||s` encoding): `ES256`, `ES384`, `ES512`
+  - EdDSA (Ed25519): `EdDSA`
   - Unsecured `none` (opt-in twice: parser option plus a sentinel key)
+  - Every method type-asserts its key, closing the algorithm-confusion attack.
+- **JWK / JWKS** (RFC 7517): `ParseJWK` / `ParseJWKSet` decode RSA, EC, OKP
+  (Ed25519), and oct keys; `JSONWebKey.Thumbprint` implements RFC 7638;
+  `JSONWebKeySet.LookupKeyID` / `.Keyfunc` select a key by `kid`; and
+  `JWKSCache` fetches and caches a remote JWKS over `net/http` (injectable
+  `HTTPDoer`) with TTL and kid-miss refresh.
+- **Detached / unencoded payload** (RFC 7797, `b64=false`) via `SignDetached` /
+  `VerifyDetached`.
 - `RegisteredClaims` (iss, sub, aud, exp, nbf, iat, jti) with numeric-date
-  encoding and string-or-array audience, `MapClaims` for arbitrary claims, and
+  encoding and string-or-array audience, `MapClaims` (with `GetNonce`,
+  `GetAuthorizedParty`, `GetID`, `GetString` helpers) for arbitrary claims, and
   support for any custom struct that implements the `Claims` interface.
 - Base64url (no padding) encoding of header, payload, and signature.
 - `Parse` / `ParseWithClaims` with a `Keyfunc` for key selection (e.g. by
   `kid`), signature verification, and validation of exp/nbf/iat, audience,
-  issuer, and subject.
+  issuer, subject, max-token-age, and required claims. `ParseUnverified`
+  decodes without verifying, and `Token.String()` re-serializes.
+- Reusable `Parser` (`NewParser(opts...)`) and JOSE `crit` / `typ` header
+  handling (unknown critical headers are rejected).
 - Injectable clock and configurable leeway for deterministic time validation.
-- PEM key helpers for RSA and EC public/private keys.
+- PEM key helpers for RSA, EC, and Ed25519 public/private keys.
 - Wrapped sentinel errors for use with `errors.Is`.
 
 ## Install
@@ -89,7 +102,28 @@ jwt.Parse(signed, keyFunc, jwt.WithClock(clock))
 
 `WithValidMethods`, `WithLeeway`, `WithClock`, `WithTimeFunc`, `WithAudience`,
 `WithIssuer`, `WithSubject`, `WithIssuedAt`, `WithExpirationRequired`,
-`WithAllowNone`, `WithJSONNumber`.
+`WithMaxTokenAge`, `WithRequiredClaims`, `WithValidTypes`,
+`WithKnownCriticalHeaders`, `WithAllowNone`, `WithJSONNumber`.
+
+## JWKS
+
+```go
+// Verify against a provider's rotating JWKS, cached and refreshed on demand.
+cache := jwt.NewJWKSCache("https://issuer.example/.well-known/jwks.json")
+token, err := jwt.Parse(signed, cache.Keyfunc(),
+    jwt.WithValidMethods([]string{"RS256", "ES256", "EdDSA"}),
+    jwt.WithIssuer("https://issuer.example"))
+```
+
+## Detached payload (RFC 7797)
+
+```go
+jws, _ := jwt.SignDetached(payload, jwt.SigningMethodEdDSA, edPriv, nil)
+// jws is "header..signature"; the payload travels out of band.
+tok, err := jwt.VerifyDetached(jws, payload,
+    func(*jwt.Token) (any, error) { return edPub, nil },
+    jwt.WithValidMethods([]string{"EdDSA"}))
+```
 
 ## License
 
