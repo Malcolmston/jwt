@@ -34,6 +34,8 @@ type validator struct {
 	expectedSub        string
 	expirationRequired bool
 	maxTokenAge        time.Duration
+	ignoreExp          bool
+	ignoreNbf          bool
 }
 
 func newValidator() *validator {
@@ -47,17 +49,21 @@ func (v *validator) Validate(c claimsGetter) error {
 	now := v.clock.Now()
 	var errs []error
 
-	if exp := c.GetExpirationTime(); exp != nil {
-		if !now.Before(exp.Add(v.leeway)) {
-			errs = append(errs, fmt.Errorf("%w: expired at %v", ErrTokenExpired, exp.Time))
+	if !v.ignoreExp {
+		if exp := c.GetExpirationTime(); exp != nil {
+			if !now.Before(exp.Add(v.leeway)) {
+				errs = append(errs, fmt.Errorf("%w: expired at %v", ErrTokenExpired, exp.Time))
+			}
+		} else if v.expirationRequired {
+			errs = append(errs, fmt.Errorf("%w: exp", ErrTokenRequiredClaimMissing))
 		}
-	} else if v.expirationRequired {
-		errs = append(errs, fmt.Errorf("%w: exp", ErrTokenRequiredClaimMissing))
 	}
 
-	if nbf := c.GetNotBefore(); nbf != nil {
-		if now.Add(v.leeway).Before(nbf.Time) {
-			errs = append(errs, fmt.Errorf("%w: not before %v", ErrTokenNotValidYet, nbf.Time))
+	if !v.ignoreNbf {
+		if nbf := c.GetNotBefore(); nbf != nil {
+			if now.Add(v.leeway).Before(nbf.Time) {
+				errs = append(errs, fmt.Errorf("%w: not before %v", ErrTokenNotValidYet, nbf.Time))
+			}
 		}
 	}
 

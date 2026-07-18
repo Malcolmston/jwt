@@ -19,6 +19,25 @@ func WithPaddingAllowed() ParserOption {
 	return func(p *Parser) { p.strictDecode = false }
 }
 
+// WithIgnoreExpiration disables the exp (expiration) claim check while leaving
+// every other validation — signature, nbf, iat, audience, issuer, subject and
+// required-claim checks — in force. It mirrors the "ignoreExpiration" option of
+// node's jsonwebtoken and is narrower than WithoutClaimsValidation, which
+// suppresses all claim checks. Because WithExpirationRequired is itself part of
+// the exp check, it too is suppressed when expiration is ignored.
+func WithIgnoreExpiration() ParserOption {
+	return func(p *Parser) { p.validator.ignoreExp = true }
+}
+
+// WithIgnoreNotBefore disables the nbf (not-before) claim check while leaving
+// every other validation in force. It mirrors the "ignoreNotBefore" option of
+// node's jsonwebtoken, letting a caller accept a token whose validity window
+// has not yet opened without also relaxing the exp, audience, issuer or subject
+// checks.
+func WithIgnoreNotBefore() ParserOption {
+	return func(p *Parser) { p.validator.ignoreNbf = true }
+}
+
 // WithoutClaimsValidation disables all claim validation performed after the
 // signature is verified: the Claims.Valid self-check, the registered time and
 // equality checks (exp, nbf, iat, aud, iss, sub, max-token-age), and the

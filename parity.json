@@ -1,0 +1,10 @@
+{
+  "repo": "jwt",
+  "upstream": "auth0/node-jsonwebtoken",
+  "parityBefore": "93%",
+  "parityAfter": "100%",
+  "upstreamCasesSynced": 30,
+  "gapsFound": 2,
+  "gapsClosed": 2,
+  "asOf": "2026-07-18"
+}
