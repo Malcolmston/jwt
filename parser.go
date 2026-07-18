@@ -24,6 +24,14 @@ type Parser struct {
 	requiredClaims []string
 	knownCrit      map[string]bool
 	validator      *validator
+
+	// strictDecode rejects base64url segments that carry '=' padding. It is
+	// toggled by WithStrictDecoding / WithPaddingAllowed (see
+	// parser_options_extra.go). The default (false) tolerates padding.
+	strictDecode bool
+	// skipClaimsValidation disables all claim validation after signature
+	// verification, set by WithoutClaimsValidation.
+	skipClaimsValidation bool
 }
 
 // ParserOption configures a Parser.
@@ -191,17 +199,20 @@ func (p *Parser) ParseWithClaims(tokenString string, claims Claims, keyFunc Keyf
 		return token, err
 	}
 
-	// Claims self-validation followed by option-driven validation.
-	if err := token.Claims.Valid(); err != nil {
-		return token, err
-	}
-	if getter, ok := token.Claims.(claimsGetter); ok {
-		if err := p.validator.Validate(getter); err != nil {
+	// Claims self-validation followed by option-driven validation, unless the
+	// caller opted out with WithoutClaimsValidation.
+	if !p.skipClaimsValidation {
+		if err := token.Claims.Valid(); err != nil {
 			return token, err
 		}
-	}
-	if err := p.checkRequiredClaims(token.Claims); err != nil {
-		return token, err
+		if getter, ok := token.Claims.(claimsGetter); ok {
+			if err := p.validator.Validate(getter); err != nil {
+				return token, err
+			}
+		}
+		if err := p.checkRequiredClaims(token.Claims); err != nil {
+			return token, err
+		}
 	}
 
 	token.Valid = true
@@ -291,6 +302,16 @@ func (p *Parser) decode(tokenString string, claims Claims) (*Token, []string, er
 	parts, err := splitToken(tokenString)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Strict decoding (WithStrictDecoding) rejects any base64url padding, as
+	// required by RFC 7515 §2 for the compact serialization.
+	if p.strictDecode {
+		for _, part := range parts {
+			if strings.Contains(part, "=") {
+				return nil, parts, fmt.Errorf("%w: base64url padding is not permitted in strict mode", ErrTokenMalformed)
+			}
+		}
 	}
 
 	token := &Token{Raw: tokenString, Claims: claims}
