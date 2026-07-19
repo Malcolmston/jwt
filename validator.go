@@ -21,6 +21,7 @@ func (f ClockFunc) Now() time.Time { return f() }
 // systemClock is the default Clock backed by time.Now.
 type systemClock struct{}
 
+// Now returns the current system time via time.Now, satisfying the Clock interface.
 func (systemClock) Now() time.Time { return time.Now() }
 
 // validator applies time-based and equality-based validation to claims. It is
