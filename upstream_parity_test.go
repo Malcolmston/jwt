@@ -204,11 +204,12 @@ func TestParityAlgConfusionRSAasHMAC(t *testing.T) {
 	}
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
 
-	// Attacker forges an HS256 token using the PEM public key bytes as secret.
-	forged, err := Sign(MapClaims{"foo": "bar"}, SigningMethodHS256, pubPEM)
-	if err != nil {
-		t.Fatalf("forge: %v", err)
+	// This package refuses to mint the forgery at all (GHSA-75rm-5v4f-887v), so
+	// the attacker has to MAC it with their own tooling.
+	if _, err := Sign(MapClaims{"foo": "bar"}, SigningMethodHS256, pubPEM); !errors.Is(err, ErrAsymmetricKeyForHMAC) {
+		t.Fatalf("sign with public key PEM: err = %v, want ErrAsymmetricKeyForHMAC", err)
 	}
+	forged := forgeHS256(t, pubPEM, `{"foo":"bar"}`)
 
 	// Victim accepts both RS256 and HS256, and resolves the RSA public key.
 	_, err = Parse(forged, func(*Token) (any, error) { return pub, nil },

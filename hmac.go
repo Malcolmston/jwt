@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	_ "crypto/sha256" // link SHA-256 for crypto.Hash.New
 	_ "crypto/sha512" // link SHA-384 and SHA-512
-	"fmt"
 )
 
 // SigningMethodHMAC implements the HMAC-SHA family (HS256, HS384, HS512).
@@ -31,11 +30,14 @@ func init() {
 // Alg returns the JWS alg identifier.
 func (m *SigningMethodHMAC) Alg() string { return m.Name }
 
-// Sign computes HMAC(key, signingString). key must be a []byte.
+// Sign computes HMAC(key, signingString). key must be a []byte holding a
+// symmetric secret; asymmetric key material is refused with
+// ErrAsymmetricKeyForHMAC so that this package cannot mint the very forgery its
+// Verify rejects.
 func (m *SigningMethodHMAC) Sign(signingString string, key any) ([]byte, error) {
-	secret, ok := key.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("%w: HMAC requires []byte, got %T", ErrInvalidKeyType, key)
+	secret, err := hmacSecret(key)
+	if err != nil {
+		return nil, err
 	}
 	if !m.Hash.Available() {
 		return nil, ErrHashUnavailable
@@ -45,11 +47,14 @@ func (m *SigningMethodHMAC) Sign(signingString string, key any) ([]byte, error) 
 	return h.Sum(nil), nil
 }
 
-// Verify recomputes the MAC and compares it in constant time.
+// Verify recomputes the MAC and compares it in constant time. A key that holds
+// asymmetric key material is refused with ErrAsymmetricKeyForHMAC rather than
+// used as a secret, closing the algorithm-confusion attack in which an HS*
+// token is MACed with the bytes of an RSA or EC public key.
 func (m *SigningMethodHMAC) Verify(signingString string, sig []byte, key any) error {
-	secret, ok := key.([]byte)
-	if !ok {
-		return fmt.Errorf("%w: HMAC requires []byte, got %T", ErrInvalidKeyType, key)
+	secret, err := hmacSecret(key)
+	if err != nil {
+		return err
 	}
 	if !m.Hash.Available() {
 		return ErrHashUnavailable

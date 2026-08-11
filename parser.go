@@ -17,7 +17,11 @@ type Keyfunc func(token *Token) (any, error)
 // Parser parses and validates tokens according to its configured options. The
 // zero value is usable but NewParser with options is the common path.
 type Parser struct {
-	validAlgs      []string
+	validAlgs []string
+	// validAlgsSet records that an allowlist was configured, distinguishing "no
+	// allowlist" (nil) from "an allowlist that permits nothing" (empty but
+	// non-nil). Without it a computed-empty list silently disables the check.
+	validAlgsSet   bool
 	allowNone      bool
 	useJSONNumer   bool
 	validTypes     []string
@@ -51,8 +55,17 @@ func NewParser(opts ...ParserOption) *Parser {
 // WithValidMethods restricts the accepted alg header values to algs. This is
 // the primary defense against algorithm-confusion attacks and should be set in
 // production.
+//
+// An empty but non-nil slice is an allowlist that permits nothing: every token
+// is rejected. This matters when the list is computed (e.g. filtered from
+// configuration) and comes out empty — the safe reading of "no algorithm is
+// allowed" is to accept none, not to disable the check. Passing nil leaves the
+// parser without an allowlist.
 func WithValidMethods(algs []string) ParserOption {
-	return func(p *Parser) { p.validAlgs = algs }
+	return func(p *Parser) {
+		p.validAlgs = algs
+		p.validAlgsSet = algs != nil
+	}
 }
 
 // WithLeeway sets a symmetric tolerance applied to exp, nbf, and iat checks.
@@ -179,8 +192,8 @@ func (p *Parser) ParseWithClaims(tokenString string, claims Claims, keyFunc Keyf
 
 	// Enforce the allowed-methods list, if configured.
 	alg, _ := token.Header["alg"].(string)
-	if len(p.validAlgs) > 0 && !contains(p.validAlgs, alg) {
-		return token, fmt.Errorf("%w: alg %q is not accepted", ErrSignatureInvalid, alg)
+	if err := p.checkAlg(alg); err != nil {
+		return token, err
 	}
 	if alg == "none" && !p.allowNone {
 		return token, fmt.Errorf("%w", ErrNoneAlgDisallowed)
@@ -217,6 +230,21 @@ func (p *Parser) ParseWithClaims(tokenString string, claims Claims, keyFunc Keyf
 
 	token.Valid = true
 	return token, nil
+}
+
+// checkAlg enforces the allowed-methods list, if one was configured. An
+// allowlist that is empty but configured permits no algorithm at all.
+func (p *Parser) checkAlg(alg string) error {
+	if !p.validAlgsSet {
+		return nil
+	}
+	if len(p.validAlgs) == 0 {
+		return fmt.Errorf("%w: the alg allowlist is empty, so no algorithm is accepted", ErrSignatureInvalid)
+	}
+	if !contains(p.validAlgs, alg) {
+		return fmt.Errorf("%w: alg %q is not accepted", ErrSignatureInvalid, alg)
+	}
+	return nil
 }
 
 // checkHeader enforces the typ and crit JOSE header constraints.

@@ -105,6 +105,20 @@ jwt.Parse(signed, keyFunc, jwt.WithClock(clock))
 `WithMaxTokenAge`, `WithRequiredClaims`, `WithValidTypes`,
 `WithKnownCriticalHeaders`, `WithAllowNone`, `WithJSONNumber`.
 
+`WithValidMethods` distinguishes `nil` (no allowlist configured) from an empty
+non-nil slice, which is an allowlist that permits *nothing* — a computed-empty
+list rejects every token rather than silently disabling the check.
+
+## Algorithm confusion
+
+The `HS*` methods require a genuinely symmetric secret. Asymmetric key material
+— a PEM or DER public/private key, a certificate, or a typed `*rsa.PublicKey`,
+`*ecdsa.PublicKey`, `ed25519.PublicKey` (or their private counterparts) — is
+refused with `ErrAsymmetricKeyForHMAC` on both the signing and the verification
+path, so a token MACed with the bytes of a verifier's public key can neither be
+minted here nor accepted. Setting `WithValidMethods` to the algorithms you
+actually expect remains the primary defense.
+
 ## JWKS
 
 ```go

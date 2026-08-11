@@ -1,6 +1,9 @@
 package jwt
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel errors returned by the package. Callers may test for these using
 // errors.Is. Parsing and validation errors are typically wrapped so that a
@@ -89,4 +92,12 @@ var (
 	// ErrJWKSFetch indicates a JWKS could not be fetched or refreshed from its
 	// remote endpoint.
 	ErrJWKSFetch = errors.New("jwt: could not fetch JWKS")
+
+	// ErrAsymmetricKeyForHMAC indicates asymmetric key material (an RSA, ECDSA
+	// or Ed25519 key, in PEM, DER, certificate or typed form) was supplied where
+	// an HS* signing method expects a symmetric secret. Accepting such a key
+	// enables the classic algorithm-confusion attack, in which an attacker MACs
+	// a token with the bytes of the verifier's public key; the HMAC methods
+	// therefore refuse it on both the signing and the verification path.
+	ErrAsymmetricKeyForHMAC = fmt.Errorf("%w: asymmetric key material cannot be used as an HMAC secret", ErrInvalidKeyType)
 )

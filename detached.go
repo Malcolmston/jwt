@@ -76,8 +76,8 @@ func VerifyDetached(jws string, payload []byte, keyFunc Keyfunc, opts ...ParserO
 	}
 
 	alg, _ := token.Header["alg"].(string)
-	if len(p.validAlgs) > 0 && !contains(p.validAlgs, alg) {
-		return token, fmt.Errorf("%w: alg %q is not accepted", ErrSignatureInvalid, alg)
+	if err := p.checkAlg(alg); err != nil {
+		return token, err
 	}
 	if alg == "none" && !p.allowNone {
 		return token, ErrNoneAlgDisallowed
